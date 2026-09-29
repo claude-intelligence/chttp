@@ -232,6 +232,21 @@ func (tlsExtensions *TLSExtensions) Clone() (*TLSExtensions, error) {
 	return clone, nil
 }
 
+// alwaysPadding: JA3 里有 padding (21) 就一定发送。
+// utls 的 BoringPaddingStyle 只在未填充长度为 256-511 字节时才加 padding, 否则整个扩展不发;
+// 而构造出的 ClientHello 长度与真实浏览器不同 (如 Chrome 123 没有 Kyber, 真实长度约 484 会补到 512),
+// 扩展就会丢失, JA3 / JA4 与指纹不一致。这里在 256-511 时仍按 BoringSSL 补到 512 字节,
+// 小于 256 也补到 512, 大于等于 512 时发送空的 padding。
+func alwaysPadding(unpaddedLen int) (int, bool) {
+	if n, ok := utls.BoringPaddingStyle(unpaddedLen); ok {
+		return n, true
+	}
+	if unpaddedLen < 0x200-4 {
+		return 0x200 - 4 - unpaddedLen, true
+	}
+	return 0, true
+}
+
 func genMap() (extMap map[string]utls.TLSExtension) {
 	extMap = map[string]utls.TLSExtension{
 		"0": &utls.SNIExtension{},
@@ -259,7 +274,7 @@ func genMap() (extMap map[string]utls.TLSExtension) {
 		},
 		"17": &utls.GenericExtension{Id: 17}, // status_request_v2
 		"18": &utls.SCTExtension{},
-		"21": &utls.UtlsPaddingExtension{GetPaddingLen: utls.BoringPaddingStyle},
+		"21": &utls.UtlsPaddingExtension{GetPaddingLen: alwaysPadding},
 		"22": &utls.GenericExtension{Id: 22}, // encrypt_then_mac
 		"23": &utls.ExtendedMasterSecretExtension{},
 		"24": &utls.FakeTokenBindingExtension{},
